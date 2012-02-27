@@ -1548,6 +1548,7 @@ def main():
     optparser.add_option("-d", "--debug", dest="verbosity", action="store_const", const=logging.DEBUG, help="Enable debug output.")
     optparser.add_option(      "--version", dest="show_version", action="store_true", help="Show s3cmd version (%s) and exit." % (PkgInfo.version))
     optparser.add_option("-F", "--follow-symlinks", dest="follow_symlinks", action="store_true", default=False, help="Follow symbolic links as if they are regular files")
+    optparser.add_option("--precomputed-md5", dest="precompute_md5_file", action="store", help="Precomputed MD5 file")
 
     optparser.set_usage(optparser.usage + " COMMAND [parameters]")
     optparser.set_description('S3cmd is a tool for managing objects in '+
@@ -1651,6 +1652,10 @@ def main():
     ## Special handling for tri-state options (True, False, None)
     cfg.update_option("enable", options.enable)
     cfg.update_option("acl_public", options.acl_public)
+
+
+    cfg.update_option("precomputed_md5_file", options.precompute_md5_file)
+
 
     ## Check multipart chunk constraints
     if cfg.multipart_chunk_size_mb < MultiPartUpload.MIN_CHUNK_SIZE_MB:

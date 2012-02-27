@@ -273,6 +273,17 @@ def compare_filelists(src_list, dst_list, src_remote, dst_remote):
     cfg = Config()
     exists_list = SortedDict(ignore_case = False)
 
+
+    # load precomputed md5 table
+    md5_table = {}
+    if cfg.precomputed_md5_file != "":
+        f = open(cfg.precomputed_md5_file, 'r')
+        for l in f.readlines():
+            (md5sum, name) = l.strip().split(' ', 1)
+            name = name.strip()
+            md5_table[name] = md5sum
+
+
     debug("Comparing filelists (direction: %s -> %s)" % (__direction_str(src_remote), __direction_str(dst_remote)))
     debug("src_list.keys: %s" % src_list.keys())
     debug("dst_list.keys: %s" % dst_list.keys())
@@ -305,11 +316,18 @@ def compare_filelists(src_list, dst_list, src_remote, dst_remote):
             if attribs_match and compare_md5:
                 try:
                     if src_remote == False and dst_remote == True:
-                        src_md5 = hash_file_md5(src_list[file]['full_name'])
+                        if src_list[file]['full_name'] in md5_table:
+                            src_md5 = md5_table[src_list[file]['full_name']]
+                        else:
+                            src_md5 = hash_file_md5(src_list[file]['full_name'])
+
                         dst_md5 = dst_list[file]['md5']
                     elif src_remote == True and dst_remote == False:
                         src_md5 = src_list[file]['md5']
-                        dst_md5 = hash_file_md5(dst_list[file]['full_name'])
+                        if dst_list[file]['full_name'] in md5_table:
+                            dst_md5 = md5_table[dst_list[file]['full_name']]
+                        else:
+                            dst_md5 = hash_file_md5(dst_list[file]['full_name'])
                     elif src_remote == True and dst_remote == True:
                         src_md5 = src_list[file]['md5']
                         dst_md5 = dst_list[file]['md5']

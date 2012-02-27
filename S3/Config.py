@@ -78,6 +78,7 @@ class Config(object):
     log_target_prefix = ""
     reduced_redundancy = False
     follow_symlinks = False
+    precomputed_md5_file = ""
     socket_timeout = 300
     invalidate_on_cf = False
     website_index = "index.html"
