@@ -835,6 +835,10 @@ def cmd_sync_local2remote(args):
         for k in attrs: result += "%s:%s/" % (k, attrs[k])
         return { 'x-amz-meta-s3cmd-attrs' : result[:-1] }
 
+    # Atomic serial number version
+    from datetime import datetime
+    serial = datetime.now().strftime("%s")
+
     s3 = S3(cfg)
 
     if cfg.encrypt:
@@ -894,11 +898,20 @@ def cmd_sync_local2remote(args):
         warning(u"Exitting now because of --dry-run")
         return
 
+    atomic_delete = []
+    atomic_put = []
+
     if cfg.delete_removed:
         for key in remote_list:
             uri = S3Uri(remote_list[key]['object_uri_str'])
-            s3.object_delete(uri)
-            output(u"deleted: '%s'" % uri)
+            if cfg.atomic:
+                uri_atomic = S3Uri("%s.atomic-delete-%s" % (uri, serial))
+                atomic_delete.append(uri_atomic)
+                s3.object_move(uri, uri_atomic, copy(cfg.extra_headers))
+                output(u"marking as deleted: '%s'" % uri)
+            else:
+                s3.object_delete(uri)
+                output(u"deleted: '%s'" % uri)
 
     uploaded_objects_list = []
     total_size = 0
@@ -919,7 +932,12 @@ def cmd_sync_local2remote(args):
                 attr_header = _build_attr_header(src)
                 debug(u"attr_header: %s" % attr_header)
                 extra_headers.update(attr_header)
-            response = s3.object_put(src, uri, extra_headers, extra_label = seq_label)
+            if cfg.atomic:
+                uri_atomic = S3Uri("%s.atomic-put-%s" % (uri, serial))
+                atomic_put.append({ 'uri': uri, 'tmp': uri_atomic })
+                response = s3.object_put(src, uri_atomic, extra_headers, extra_label = seq_label)
+            else:
+                response = s3.object_put(src, uri, extra_headers, extra_label = seq_label)
         except InvalidFileError, e:
             warning(u"File can not be uploaded: %s" % e)
             continue
@@ -937,6 +955,17 @@ def cmd_sync_local2remote(args):
     total_elapsed = time.time() - timestamp_start
     total_speed = total_elapsed and total_size/total_elapsed or 0.0
     speed_fmt = formatSize(total_speed, human_readable = True, floating_point = True)
+
+    if cfg.atomic:
+        # delete items that were marked to be deleted
+        for key in atomic_delete:
+            s3.object_delete(key)
+            output(u"atomically deleted: '%s'" % uri)
+
+        # rename put items in proper place
+        for key in atomic_put:
+            s3.object_move(key['tmp'], key['uri'], copy(cfg.extra_headers))
+            output(u"moving object to place: '%s'" % key['uri'])
 
     # Only print out the result if any work has been done or
     # if the user asked for verbose output
@@ -1548,7 +1577,8 @@ def main():
     optparser.add_option("-d", "--debug", dest="verbosity", action="store_const", const=logging.DEBUG, help="Enable debug output.")
     optparser.add_option(      "--version", dest="show_version", action="store_true", help="Show s3cmd version (%s) and exit." % (PkgInfo.version))
     optparser.add_option("-F", "--follow-symlinks", dest="follow_symlinks", action="store_true", default=False, help="Follow symbolic links as if they are regular files")
-    optparser.add_option("--precomputed-md5", dest="precompute_md5_file", action="store", help="Precomputed MD5 file")
+    optparser.add_option(      "--precomputed-md5", dest="precompute_md5_file", action="store", help="Precomputed MD5 file")
+    optparser.add_option(      "--atomic", dest="atomic", action="store_true", help="Atomic operations")
 
     optparser.set_usage(optparser.usage + " COMMAND [parameters]")
     optparser.set_description('S3cmd is a tool for managing objects in '+
@@ -1655,6 +1685,8 @@ def main():
 
 
     cfg.update_option("precomputed_md5_file", options.precompute_md5_file)
+    if options.atomic:
+        cfg.update_option("atomic", options.atomic)
 
 
     ## Check multipart chunk constraints
