@@ -960,7 +960,7 @@ def cmd_sync_local2remote(args):
         # delete items that were marked to be deleted
         for key in atomic_delete:
             s3.object_delete(key)
-            output(u"atomically deleted: '%s'" % uri)
+            output(u"atomically deleted: '%s'" % key)
 
         # rename put items in proper place
         for key in atomic_put:
