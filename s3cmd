@@ -629,12 +629,8 @@ def subcmd_cp_mv(args, process_fce, action_str, message):
         warning(u"Exitting now because of --dry-run")
         return
 
-#    seq = 0
-#    for key in remote_list:
-#        seq += 1
-#        seq_label = "[%d of %d]" % (seq, remote_count)
     if cfg.parallel and len(remote_list) > 1:
-        # Disabling progress metter for parallel downloads.
+        # Disabling progress meter for parallel downloads.
         cfg.progress_meter = False
 
         # Initialize Queue
@@ -1216,9 +1212,12 @@ def do_local2remote_work(item,seq,total):
     if not cfg.progress_meter:
         output(u"File '%s' started %s" %
             (item['full_name_unicode'], seq_label))
+
+    stored_uri = uri
     try:
         if cfg.atomic:
             uri_atomic = S3Uri("%s.atomic-put-%s" % (uri, serial))
+            stored_uri = uri_atomic
             atomic_put.append({ 'uri': uri, 'tmp': uri_atomic })
             response = s3.object_put(src, uri_atomic, extra_headers, extra_label = seq_label)
         else:
@@ -1232,7 +1231,7 @@ def do_local2remote_work(item,seq,total):
     speed_fmt = formatSize(response["speed"], human_readable = True, floating_point = True)
     if not cfg.progress_meter:
         output(u"File '%s' stored as '%s' (%d bytes in %0.1f seconds, %0.2f %sB/s) %s" %
-            (item['full_name_unicode'], uri, response["size"], response["elapsed"], 
+            (item['full_name_unicode'], stored_uri, response["size"], response["elapsed"], 
             speed_fmt[0], speed_fmt[1], seq_label))
 
 def cmd_sync(args):
