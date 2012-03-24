@@ -780,10 +780,36 @@ def cmd_sync_remote2remote(args):
             for key in dst_list:
                 output(u"delete: %s" % dst_list[key]['object_uri_str'])
         else:
-            for key in dst_list:
-                uri = S3Uri(dst_list[key]['object_uri_str'])
-                s3.object_delete(uri)
-                output(u"deleted: '%s'" % uri)
+            if cfg.parallel and len(dst_list) > 1:
+                # Disabling progress meter for parallel deletes.
+                cfg.progress_meter = False
+
+                # Initialize Queue
+                global q
+                q = Queue.Queue()
+
+                seq = 0
+                for key in dst_list:
+                    seq += 1
+                    uri = S3Uri(dst_list[key]['object_uri_str'])
+                    q.put(uri)
+
+                for i in range(cfg.workers):
+                    t = threading.Thread(target=delete_worker)
+                    t.daemon = True
+                    t.start()
+
+                # Necessary to ensure KeyboardInterrupt can actually kill
+                # Otherwise Queue.join() blocks until all queue elements have completed
+                while threading.activeCount() > 1:
+                    time.sleep(.1)
+                    q.join()
+
+            else:
+                for key in dst_list:
+                    uri = S3Uri(dst_list[key]['object_uri_str'])
+                    s3.object_delete(uri)
+                    output(u"deleted: '%s'" % uri)
 
     # Perform the synchronization of files
     timestamp_start = time.time()
@@ -808,6 +834,19 @@ def cmd_sync_remote2remote(args):
         output(outstr)
     else:
         info(outstr)
+
+def delete_worker():
+    while True:
+        try:
+            uri = q.get_nowait()
+        except Queue.Empty:
+            return
+        try:
+            s3.object_delete(uri)
+        except Exception, e:
+            report_exception(e)
+            exit
+        q.task_done
 
 def cmd_sync_remote2local(args):
     s3 = S3(Config())
