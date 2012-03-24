@@ -23,6 +23,7 @@ import locale
 import subprocess
 import htmlentitydefs
 import socket
+import types
 
 import Queue
 import threading
@@ -1175,7 +1176,6 @@ def cmd_sync_local2remote(args):
                 output("Check progress with: s3cmd cfinvalinfo cf://%s/%s" % (result['dist_id'], result['request_id']))
 
 def finalize_objects_in_place():
-    import type
     while True:
         try:
             item = q.get_nowait()
