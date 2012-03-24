@@ -1133,14 +1133,25 @@ def cmd_sync_local2remote(args):
 
     if cfg.atomic:
         # delete items that were marked to be deleted
+        global q
+        q = Queue.Queue()
         for key in atomic_delete:
-            s3.object_delete(key)
-            output(u"atomically deleted: '%s'" % key)
+            q.put(['delete', key])
+
 
         # rename put items in proper place
         for key in atomic_put:
-            s3.object_move(key['tmp'], key['uri'], copy(cfg.extra_headers))
-            output(u"moving object to place: '%s'" % key['uri'])
+            q.put(['move', [key['tmp'], key['uri'], copy(cfg.extra_headers)]])
+
+        for i in range(cfg.workers):
+            t = threading.Thread(target=finalize_objects_in_place)
+            t.daemon = True
+            t.start()
+
+        # Necessary to ensure KeyboardInterrupt can actually kill
+        # Otherwise Queue.join() blocks until all queue elements have completed
+        while threading.activeCount() > 1:
+            time.sleep(.1)
 
     if cfg.invalidate_on_cf:
         if len(uploaded_objects_list) == 0:
@@ -1152,6 +1163,28 @@ def cmd_sync_local2remote(args):
             if result['status'] == 201:
                 output("Created invalidation request for %d paths" % len(uploaded_objects_list))
                 output("Check progress with: s3cmd cfinvalinfo cf://%s/%s" % (result['dist_id'], result['request_id']))
+
+def finalize_objects_in_place():
+    import type
+    while True:
+        try:
+            item = q.get_nowait()
+            if type(item) is type.ListType:
+                if item[0] == 'delete':
+                    s3.object_delete(item[1])
+                    output(u"atomically deleted: '%s'" % item[1])
+                elif item[1] == 'move':
+                    s3.object_move(item[1], item[2], item[3])
+                    output(u"moving object to place: '%s'" % item[2])
+            try:
+                pass
+            except Exception, e:
+                report_exception(e)
+                exit
+        except Queue.Empty:
+            return
+
+    pass
 
 
 
