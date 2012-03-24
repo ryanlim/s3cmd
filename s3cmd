@@ -1179,7 +1179,7 @@ def finalize_objects_in_place():
     while True:
         try:
             item = q.get_nowait()
-            if type(item) is type.ListType:
+            if type(item) is types.ListType:
                 if item[0] == 'delete':
                     s3.object_delete(item[1])
                     output(u"atomically deleted: '%s'" % item[1])
