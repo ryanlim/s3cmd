@@ -1133,25 +1133,35 @@ def cmd_sync_local2remote(args):
 
     if cfg.atomic:
         # delete items that were marked to be deleted
-        global q
-        q = Queue.Queue()
-        for key in atomic_delete:
-            q.put(['delete', key])
+        if cfg.parallel and len(file_list) > 1:
+            q = Queue.Queue()
+            for key in atomic_delete:
+                q.put(['delete', key])
 
 
-        # rename put items in proper place
-        for key in atomic_put:
-            q.put(['move', [key['tmp'], key['uri'], copy(cfg.extra_headers)]])
+            # rename put items in proper place
+            for key in atomic_put:
+                q.put(['move', [key['tmp'], key['uri'], copy(cfg.extra_headers)]])
 
-        for i in range(cfg.workers):
-            t = threading.Thread(target=finalize_objects_in_place)
-            t.daemon = True
-            t.start()
+            for i in range(cfg.workers):
+                t = threading.Thread(target=finalize_objects_in_place)
+                t.daemon = True
+                t.start()
 
-        # Necessary to ensure KeyboardInterrupt can actually kill
-        # Otherwise Queue.join() blocks until all queue elements have completed
-        while threading.activeCount() > 1:
-            time.sleep(.1)
+            # Necessary to ensure KeyboardInterrupt can actually kill
+            # Otherwise Queue.join() blocks until all queue elements have completed
+            while threading.activeCount() > 1:
+                time.sleep(.1)
+        else:
+            # delete items that were marked to be deleted
+            for key in atomic_delete:
+                s3.object_delete(key)
+                output(u"atomically deleted: '%s'" % key)
+
+            # rename put items in proper place
+            for key in atomic_put:
+                s3.object_move(key['tmp'], key['uri'], copy(cfg.extra_headers))
+                output(u"moving object to place: '%s'" % key['uri'])
 
     if cfg.invalidate_on_cf:
         if len(uploaded_objects_list) == 0:
