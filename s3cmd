@@ -1086,16 +1086,42 @@ def cmd_sync_local2remote(args):
 
 
     if cfg.delete_removed:
-        for key in remote_list:
-            uri = S3Uri(remote_list[key]['object_uri_str'])
-            if cfg.atomic:
-                uri_atomic = S3Uri("%s.atomic-delete-%s" % (uri, serial))
-                atomic_delete.append(uri_atomic)
-                s3.object_move(uri, uri_atomic, copy(cfg.extra_headers))
-                output(u"marking as deleted: '%s'" % uri)
-            else:
-                s3.object_delete(uri)
-                output(u"deleted: '%s'" % uri)
+        if cfg.parallel and len(remote_list) > 1:
+            global q
+            q = Queue.Queue()
+            for key in remote_list:
+                uri = S3Uri(remote_list[key]['object_uri_str'])
+                if cfg.atomic:
+                    uri_atomic = S3Uri("%s.atomic-delete-%s" % (uri, serial))
+                    atomic_delete.append(uri_atomic)
+                    q.put(['move', uri, uri_atomic, copy(cfg.extra_headers)])
+                else:
+                    q.put(['delete', uri])
+
+            for i in range(cfg.workers):
+                t = threading.Thread(target=finalize_objects_in_place)
+                t.daemon = True
+                t.start()
+
+
+            # Necessary to ensure KeyboardInterrupt can actually kill
+            # Otherwise Queue.join() blocks until all queue elements have completed
+            while threading.activeCount() > 1:
+                time.sleep(.1)
+
+            q.join()
+
+        else:
+            for key in remote_list:
+                uri = S3Uri(remote_list[key]['object_uri_str'])
+                if cfg.atomic:
+                    uri_atomic = S3Uri("%s.atomic-delete-%s" % (uri, serial))
+                    atomic_delete.append(uri_atomic)
+                    s3.object_move(uri, uri_atomic, copy(cfg.extra_headers))
+                    output(u"marking as deleted: '%s'" % uri)
+                else:
+                    s3.object_delete(uri)
+                    output(u"deleted: '%s'" % uri)
 
     total_size = 0
     total_elapsed = 0.0
@@ -1107,7 +1133,6 @@ def cmd_sync_local2remote(args):
         # Disabling progress meter for parallel downloads.
         cfg.progress_meter = False
         # Initialize Queue
-        global q
         q = Queue.Queue()
 
         seq = 0
@@ -1142,7 +1167,7 @@ def cmd_sync_local2remote(args):
 
             # rename put items in proper place
             for key in atomic_put:
-                q.put(['move', [key['tmp'], key['uri'], copy(cfg.extra_headers)]])
+                q.put(['move', key['tmp'], key['uri'], copy(cfg.extra_headers)])
 
             for i in range(cfg.workers):
                 t = threading.Thread(target=finalize_objects_in_place)
@@ -1153,6 +1178,8 @@ def cmd_sync_local2remote(args):
             # Otherwise Queue.join() blocks until all queue elements have completed
             while threading.activeCount() > 1:
                 time.sleep(.1)
+
+            q.join()
         else:
             # delete items that were marked to be deleted
             for key in atomic_delete:
@@ -1176,6 +1203,7 @@ def cmd_sync_local2remote(args):
                 output("Check progress with: s3cmd cfinvalinfo cf://%s/%s" % (result['dist_id'], result['request_id']))
 
 def finalize_objects_in_place():
+    s3 = S3(cfg)
     while True:
         try:
             item = q.get_nowait()
@@ -1183,18 +1211,13 @@ def finalize_objects_in_place():
                 if item[0] == 'delete':
                     s3.object_delete(item[1])
                     output(u"atomically deleted: '%s'" % item[1])
-                elif item[1] == 'move':
+                    q.task_done()
+                elif item[0] == 'move':
                     s3.object_move(item[1], item[2], item[3])
                     output(u"moving object to place: '%s'" % item[2])
-            try:
-                pass
-            except Exception, e:
-                report_exception(e)
-                exit
+                    q.task_done()
         except Queue.Empty:
             return
-
-    pass
 
 
 
